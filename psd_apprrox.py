@@ -25,7 +25,7 @@ def FixedRankPsdApp(A,r,k, mu):
     B = torch.matmul(torch.conj(Omega).transpose(1,0), Ynu)
     temp_B = (B+ torch.conj(B).transpose(1,0))/2
     #print(temp_B - temp_B.transpose(1,0))
-    C = torch.cholesky(temp_B)
+    C = torch.cholesky(temp_B, upper=True)
     #print(torch.matmul(C, torch.conj(C)) == temp_B)
     E = torch.matmul(Ynu, torch.inverse(C))
     U, S, V = torch.svd(E)
