@@ -12,60 +12,7 @@ tenType = torch.FloatTensor
 
 m0 =16
 
-class FrMap(Function):
-    """
-    @staticmethod
-    def forward(ctx, input, model):
-        
-        #: batch of tensors of size (d0, q)
-       
-        print("Forward FrMap")
-        
-        W1_c = [model.filter_weights[i].contiguous() for i in range(model.num_filters)]
-        W1 = [W1_c[i].view(1, W1_c[i].shape[0], W1_c[i].shape[1]) for i in range(model.num_filters)]
-        X1_list= [torch.matmul(W1[i], input) for i in range(model.num_filters)]
-        print(X1_list[0].grad_fn)
-        X1_tensor = torch.stack(X1_list)
-        
-        #X1_tensor = X1_tensor.view((X1_tensor.shape[1],
-        #                            X1_tensor.shape[2],
-        #                            X1_tensor.shape[0],
-        #                            X1_tensor.shape[3]))
-        ctx.save_for_backward(input)
-        return X1_tensor
-    """
-    @staticmethod
-    def forward(ctx, input, X1_list):
-        """
-        inputs: batch of tensors of size (d0, q)
-        """ 
-        print("Forward FrMap")
-        X1_tensor = torch.stack(X1_list)
-        ctx.save_for_backward(input)
-        return X1_tensor
     
-   
-    def backward(ctx, grad_outputs):
-        
-        #grad_outputs is of size (d1, m0,q)
-       
-        print("Backward FrMap")
-        input= ctx.saved_tensors
-        [batch_size, d1, m0,q] = grad_outputs.shape
-        grads = torch.zeros_like(grad_outputs)
-        
-        for m in range(m0):
-            
-            grads[:,:,m,:] = torch.matmul(grad_outputs[:,:,m,:], input.transpose(1,0))
-            #ctx.model.filter_weights[m].grad =  grads[:,:,m,:].copy()
-            ctx.model.filter_weights[m].grad.fill_(grads[:,:,m,:])
-            print("grads")
-        return grads
-   
-    
-            
-            
-            
 class Reorth(Function):
         
         @staticmethod
@@ -76,42 +23,21 @@ class Reorth(Function):
             d1 > q : to have a reduced form of QR
             """
             [batch_size, d1, m0, q] = inputs.shape
-            #ctx.Q_fft = torch.zeros_like(inputs).type(tenType).cuda()
-            #ctx.R_fft =  torch.zeros(batch_size, m0, m0, q).cuda()
-            ctx.m0 = m0
-            #Q_fft = torch.zeros_like(inputs).type(tenType).cuda()
-           # R_fft =  torch.zeros(batch_size, q, m0, q).cuda()
-            
+            ctx.m0 = m0            
             print("Forward Reorth")
             inputs = inputs.type(tenType)
             [batch_size, d1, m0, q] = inputs.shape
             inputs_fft = torch.fft.fft(inputs)
-            #Q_tensor =  torch.zeros_like(inputs).type(tenType).cuda()
-            #R_tensor =  torch.zeros(batch_size, m0, m0, q).cuda()
-            #tronquer à la dimension de filtrage
+
             list_Q = []
             list_R = []
             for q0 in range(q):
                 (Q, R) = torch.qr(inputs_fft[:,:, :, q0], some=True)
                 list_Q.append(Q)
                 list_R.append(R)
-                #Q_tensor[:,:,:,q0] = Q
-                #R_tensor[:,:,:,q0] = R
-            #Q_tensor = torch.stack(list_Q)
-            #R_tensor = torch.stack(list_Q)
-            #Q_tensor = Q_tensor.view(batch_size, d1, m0, q)
-            """
-            #tronquer à la 3e dimension des tenseurs
-            for m in range(m0):
-                (Q, R) = torch.qr(inputs_fft[:,:, m, :], some=True)
-                Q_tensor[:,:,m,:] = Q
-                R_tensor[:,:,m,:] = R
-            """
+
             ctx.Q_fft = torch.stack(list_Q).view(batch_size, d1, m0, q).type(torch.FloatTensor).cuda()
             ctx.R_fft = torch.stack(list_R).view(batch_size, m0, m0, q).type(torch.FloatTensor).cuda()
-            #print("R_tensor.shape", R_tensor.shape)
-            #Q_ifft_tensor = np.fft.ifft(Q_tensor.cpu()).real
-            #Q_ifft_tensor = torch.fft.ifft(ctx.Q_fft)
             return  torch.real(torch.fft.ifft(ctx.Q_fft))
         
         @staticmethod
@@ -134,10 +60,7 @@ class Reorth(Function):
                 #print("Q_fft shape", ctx.Q_fft.shape)
                 Q = ctx.Q_fft[:,:,:,q0]
                 R = ctx.R_fft[:,:,:,q0]
-                #print("R.shape", R.shape)
                 R_inv = torch.pinverse(R)
-                #print("Q.shape", Q.shape)
-                #print("eye(d1.shape", torch.eye(d1).cuda().shape )
                 list_eye = [torch.eye(d1).cuda() for i in range(batch_size)]
                 tensors_eye = torch.stack(list_eye)
                 S = tensors_eye - torch.matmul(Q, Q.transpose(1,2) )
@@ -148,40 +71,10 @@ class Reorth(Function):
                 temp = torch.matmul(Q.transpose(1,2), dLdQ[:, :, :, q0])
                 temp_bsym = torch.tril(temp) - torch.tril(temp.transpose(1, 2))
                 ele_2 = torch.matmul(Q, temp_bsym)
-                #grad[:, :,m, :] = torch.matmul(ele_1+ele_2, R_inv.transpose(1,2))
-                #print("R_in.shape", R_inv.shape)
-                #grad[:, :,:, q0]=  torch.matmul(ele_1+ele_2, R_inv.transpose(1,2))
                 list_grad.append(torch.matmul(ele_1+ele_2, R_inv.transpose(1,2)))
                 
             grad =  torch.stack(list_grad).view(batch_size, d1, d2, q).cuda()
                 
-            """
-            for m in range(m0): 
-                #print("m", m)
-                #print("Q_fft shape", ctx.Q_fft.shape)
-                Q = ctx.Q_fft[:,:,m,:]
-                R = ctx.R_fft[:,:,m,:]
-                print("R.shape", R.shape)
-                R_inv = torch.pinverse(R)
-                #print("Q.shape", Q.shape)
-                #print("eye(d1.shape", torch.eye(d1).cuda().shape )
-                list_eye = [torch.eye(d1).cuda() for i in range(batch_size)]
-                tensors_eye = torch.stack(list_eye)
-                S = tensors_eye - torch.matmul(Q, Q.transpose(1,2) )
-                #print("S.shape", S.shape)
-                ele_1 = torch.matmul(S.transpose(1,2), dLdQ[:, :, m, :])
-                temp = torch.matmul(Q.transpose(1,2), dLdQ[:, :, m, :])
-                temp_bsym = torch.tril(temp) - torch.tril(temp.transpose(1, 2))
-                ele_2 = torch.matmul(Q, temp_bsym)
-                #grad[:, :,m, :] = torch.matmul(ele_1+ele_2, R_inv.transpose(1,2))
-                print("R_in.shape", R_inv.shape)
-                u =  torch.matmul(ele_1+ele_2, R_inv.transpose(1,2))
-                print("u.shape", u.shape)
-            
-            grad_ifft = np.fft.ifft(grad.cpu()).real
-            """
-            #grad_ifft = torch.fft.ifft(grad)
-           
             return  torch.real(torch.fft.ifft(grad))
         
 
@@ -197,33 +90,16 @@ class OrthMap(Function):
         print("Forward OrthMap")
         
         [batch_size, d1, d1, q_tilde] = input.shape
-        print("d1", d1)
-        #ctx.d2 = d2
-        #ctx.q = q
-        #ctx.m1 = m1
         list_Ufft=[]
-        #ctx.U_fft_tensor =  torch.zeros(batch_size, d1,d1,q_tilde).type(tenType).cuda()
-        #ctx.S_fft_tensor = torch.zeros(batch_size, d1).type(tenType).cuda()
-        #[batch_size, d2, d2, q] = inputs.shape
-        #self.q = q
-        #self.m1 = m1
-        #self.d2 = d2
-        #inputs_fft = np.fft.fft(input.cpu().detach().numpy())
         inputs_fft = torch.fft.fft(input).cuda()
-        #U_tensor =  torch.zeros(batch_size, d2,m1,q).type(tenType).cuda()
         list_S = []
         for i in range(q_tilde):
             (U, S, V) = torch.svd(inputs_fft[:,:, :, i], some=True)
-            #self.U_fft_tensor[:,:,:,i] = U[:,:,:m1]
             list_Ufft.append(U[:,:,:])
-            #ctx.U_fft_tensor[:,:,:,i] = U
             list_S.append(S)
         ctx.U_fft_tensor = torch.stack(list_Ufft).view(batch_size, d1,d1,q_tilde).type(tenType).cuda()
-        print(ctx.U_fft_tensor.shape)
         ctx.S_fft_tensor = torch.stack(list_S)
-        #U_ifft_tensor = torch.real(torch.fft.ifft(ctx.U_fft_tensor))
-            
-        #return  torch.from_numpy(U_ifft_tensor[:,:,:m1,:]).cuda()
+
         return  torch.real(torch.fft.ifft(ctx.U_fft_tensor[:,:,:m1,:]))
     
     
@@ -238,11 +114,7 @@ class OrthMap(Function):
         print(grad_outputs.shape)
         [batch_size, d1, m1, q_tilde] = grad_outputs.shape
         dLdU = grad_outputs.type(tenType).cuda() #needs concatenation of zeros to complete [bs, d1, d1]
-        #grad = torch.zeros((dLdU.shape[0], dLdU.shape[1], d1, q_tilde)).type(tenType).cuda()
         list_grad = []
-        #batch_size = grad_outputs.shape[0]
-        #d2 = ctx.S_fft_tensor.shape[-1]
-        #q =  ctx.S_fft_tensor.shape[0]
         for i in range(q_tilde):
              #Ks = torch.zeros((dLdU.shape[0], dLdU.shape[1], dLdU.shape[1])).type(tenType)
                  ctx.S_fft_tensor = ctx.S_fft_tensor.contiguous()
@@ -263,23 +135,12 @@ class OrthMap(Function):
                  #print("temp.shape", temp.shape)
                  #print("torch.zeros((batch_size, d1, d1-dLdU[:,:,:,i].shape[-1])", torch.zeros((batch_size, d1, d1-dLdU[:,:,:,i].shape[-1])).shape)
                  temp = torch.cat((temp, torch.zeros((batch_size, d1, d1-dLdU[:,:,:,i].shape[-1]), dtype=torch.float32).cuda()), dim=2)
-                 #print("temp.shape", temp.shape)
-                 #print("q", q)
-                 #print("d2", d2)
-                 #temp = torch.cat((temp, torch.zeros((self.d2, self.m1), dtype=torch.float32)), dim=1)
-                 #print("temps.shape", temp.shape)
-                 #print("dLdU.shape", dLdU.shape)
-                 #print("temp", temp.device)
                  K = K.transpose(1,0)
-                 #print("K.shape", K.shape)
                  temp = K*temp
-                 #print("ctx.U_fft_tensor[:,:,:,i]", ctx.U_fft_tensor[:,:,:,i].dtype)
-                 #print("temp", temp.dtype)
                  temp = temp.type('torch.cuda.FloatTensor')
                  temp = torch.matmul(ctx.U_fft_tensor[:,:,:,i], temp)
                  
                  temp = torch.matmul(temp, U_fft_tensor_t[:,:,:,i] )
-                 #grad[:, :, :,i] = temp
                  list_grad.append(temp)
         grad = torch.stack(list_grad).view(dLdU.shape[0], dLdU.shape[1], d1, q_tilde)     
         return torch.real( torch.fft.ifft(grad))
@@ -312,18 +173,14 @@ def call_ProjMap(inputs):
             outputs.append(torch.from_numpy(t_product(inputs[i,:,:,:], t_transpose(inputs[i,:,:,:]) )))
         outputs = torch.stack(outputs).cuda()
         return outputs
-     
-def call_FrMap(inputs, model):
-    frmap= FrMap.apply
-    return  frmap(inputs,model)
-        
+
 def call_reorthmap(inputs):
-    reorth = Reorth(inputs)
-    return reorth.apply(inputs)
+    #reorth = Reorth(inputs)
+    return Reorth(inputs).apply(inputs)
 
 def call_orthmap(inputs):
-    orth = OrthMap(inputs)
-    return orth.apply(inputs)
+    #orth = OrthMap(inputs)
+    return  OrthMap(inputs).apply(inputs)
     
 def reim_grad_fct(W, euc_grad):
     """
