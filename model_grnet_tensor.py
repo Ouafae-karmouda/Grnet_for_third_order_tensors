@@ -10,7 +10,7 @@ import torch
 from torch.autograd import Variable
 import torch.nn.functional as F
 import numpy as np
-from layers_fcts import call_reorthmap, call_ProjMap, call_ProjPooling, call_orthmap, call_FrMap, update_params_filters
+from layers_fcts import call_reorthmap, call_ProjMap, call_ProjPooling, call_orthmap, update_params_filters
 from tlinalg import t_product_tensors, t_transpose
 
 tenType = torch.cuda.FloatTensor 
@@ -112,7 +112,6 @@ class Grnet_tensors(torch.nn.Module):
 
             new_W1 = []
             for i in range(self.num_filters):
-                #new_W1.append(utils.update_params_model(W1_np[i], eugrad_W1[i],lr))
                 new_W1.append(update_params_filters(self.filter_weights[i].data, 
                                                     self.filter_weights[i].grad.data,lr))
                 self.filter_weights[i].data.copy_(tenType(new_W1[i]))
